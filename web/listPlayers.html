@@ -1,0 +1,23 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+
+<html>
+  <body>
+	<h1>Listing Players</h1>
+    {% for player in players %}
+	<div>
+    	<h2>{{ player.nickname }}</h2>
+    	Last heartbeat: {{ player.lastHeartbeat }}<br>
+    	Position: {{ player.position }}<br>
+    	Birthdate: {{ player.birthdate }}<br>
+    	<form action="/update" method="post">
+			<input type="hidden" name="playerID" value="{{ player.key.urlsafe }}" />
+    		<input type="text" name="lat" />
+    		<input type="text" name="lon" />
+    		<input type="submit" value="Update" />
+    	</form>
+	</div>
+    {% endfor %}
+        
+  </body>
+</html>

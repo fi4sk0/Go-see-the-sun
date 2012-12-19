@@ -1,0 +1,32 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+
+<html>
+  <body>
+  	<h1>Showing {{ game.name }}</h1><i>(created: {{ game.birthdate }})</i>
+
+        <blockquote>{{ game.description }}</blockquote>
+		<br>
+		<h2>List of players</h2>
+	    {% for player in players %}
+    	    <div>{{ player.nickname }} ({{ player.position }})</div>
+   	 	{% endfor %}        
+        {% if players.count == 0 %}
+         <p>Sorry, no players in this game right now.</p>
+        {% endif %}
+        
+        <form action="/" method="post">
+        	<input type="hidden" name="deleteID" value="{{game.key.urlsafe}}" />
+        	<input type="submit" value="Delete this game" />
+        </form>
+        
+  	<hr>
+	
+	<h2>Create Player:</h2>
+	<form action="/createPlayer" method="post">
+		<input type="hidden" name="ancestor" value="{{ game.key.urlsafe }}">
+		Nickname: <input type="text" name="nickname"><br>
+		<input type="submit" value="Create">
+	</form>    
+  </body>
+</html>

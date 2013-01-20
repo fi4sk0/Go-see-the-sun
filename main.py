@@ -4,13 +4,18 @@ import os
 import logging
 
 from google.appengine.ext.webapp import template
+from google.appengine.ext import ndb
+from google.appengine.api import memcache
 
 from goseethesun.service import GameService
 from goseethesun.service import PlayerService
+from goseethesun.core import Game
+from goseethesun.core import Entity
+from goseethesun.core import Player
+from goseethesun.gamecontrollers.BasicGameController import BasicGameController
 
 import json
 
-from goseethesun.helper.gis import Vector
 
 class WebGamesHandler(webapp2.RequestHandler):
     def get(self):
@@ -18,65 +23,40 @@ class WebGamesHandler(webapp2.RequestHandler):
         template_values = {'games': games}
         path = os.path.join(os.path.dirname(__file__), 'web/listGames.html')
         self.response.out.write(template.render(path, template_values))
-        v = Vector(1., 2., 3.)
-        logging.info(v / 2.)
-        logging.info(v.length())
-        
-    def post(self):
-        
-        if(self.request.get('deleteID')):
-            self.delete()
-            return
-        
-        gameId = self.request.get('id')
-        game = GameService.getbyURLsafeKey(gameId)
-        players = GameService.getPlayers(game)
-        PlayerService.injectCachedPosition(players)
-        template_values = {'game'    : game,
-                           'players' : players}
-        
-        path = os.path.join(os.path.dirname(__file__), 'web/showGame.html')
-        self.response.out.write(template.render(path, template_values))
 
-    def delete(self):
-        logging.info("delete stuff")
-        gameId = self.request.get('deleteID')
-        game = GameService.getbyURLsafeKey(gameId)
-        players = GameService.getPlayers(game)
-        for player in players:
-            player.key.delete()
-        game.key.delete()
-        self.redirect('/')
-        
-class CreateGame(webapp2.RequestHandler):
-    def get(self):
-        self.redirect("/")
-        
     def post(self):
-        description = self.request.get("description")
-        name = self.request.get("name")
-        private = self.request.get("private") != ''
-        GameService.createGame(name, description, private)
-        self.redirect("/")
+        games = Game.query()
+        for game in games:
+            game.key.delete()
+
+        entities = Entity.query()
+        for entity in entities:
+            entity.key.delete()
+
+        self.redirect('/')
 
 
 class JSONGamesHandler(webapp2.RequestHandler):
     def get(self):
+        logging.info(self.request)
         self.response.headers['Content-Type'] = 'application/json'
         games = GameService.allGames()
-        self.response.out.write(GameService.toJSON(games))  
+        self.response.out.write(GameService.toJSON(games))
+        logging.info(self.response)
         
-    def post(self):  
+    def post(self):
         self.response.headers['Content-Type'] = 'application/json'
         args = json.loads(self.request.body)
         name = args['name']
         description = args['description']
         private = args['private'] != '';
+        lat = args['lat']
+        lon = args['lon']
         logging.info(name)
         logging.info(description)
         logging.info(private)
-        game = GameService.createGame(name, description, private)
-        games = [game];
+        game = GameService.createGame(name, description, private, lat, lon)
+        games = [game]
         self.response.out.write(GameService.toJSON(games))  
 
 
@@ -84,19 +64,20 @@ class JSONPlayerHandler(webapp2.RequestHandler):
     def post(self):
         self.response.headers['Content-Type'] = 'application/json'
         args = json.loads(self.request.body)
-        urlsafekey = args['urlsafekey']
+        gameId = args['gameKeyId']
         nickname = args['nickname']
-        game = GameService.getbyURLsafeKey(urlsafekey)
-        player = GameService.createPlayer(game, nickname)
+        player = GameService.createPlayer(gameId, nickname)
         players = [player]
+
         self.response.out.write(PlayerService.toJSON(players))
         logging.info(PlayerService.toJSON(players))
+
 
 class JSONResignHandler(webapp2.RequestHandler):
     def post(self):
         logging.info(self.request.body)
         args = json.loads(self.request.body)
-        playerKey = args['playerKey']
+        playerKey = args['id']
         PlayerService.deletePlayer(playerKey)
 
                 
@@ -105,74 +86,43 @@ class JSONPositionHandler(webapp2.RequestHandler):
         args = json.loads(self.request.body)
         lat = args['lat']
         lon = args['lon']
-        playerKey = args['playerKey']
-        
-        PlayerService.updateCachedPosition(playerKey, lat, lon)
-        player = PlayerService.getbyURLsafeKey(playerKey)
-        players = GameService.getBuddies(player)
-        logging.info(len(players))
-        #PlayerService.injectCachedPosition(players)
+        playerId = int(args['id'])
+
+        PlayerService.updateCachedPosition(playerId, lat, lon)
+
+        players = GameService.getBuddies(playerId)
+
+        #GameService.executeGameLogicForPlayer(player)
+
         self.response.headers['Content-Type'] = 'application/json'
         self.response.out.write(PlayerService.toJSON(players))
+        logging.info(self.response)
+
+class JSONActionHandler(webapp2.RequestHandler):
+    def post(self):
+        args = json.loads(self.request.body)
+        playerId = int(args['id'])
+        action = args['action']
+        target = args['target']
+        game = GameService.getGameForPlayer(playerId)
+        controller = BasicGameController.get_by_id(game.gameControllerId, parent=None)
+        getattr(controller, action)(target, playerId)
+
 
 class JSONStaticsHandler(webapp2.RequestHandler):
     pass
 
 class JSONDynamicsHandler(webapp2.RequestHandler):
     pass
-                
-
-class UpdateHandler(webapp2.RequestHandler):
-    def get(self):
-        players = PlayerService.allPlayers()
-        PlayerService.injectCachedPosition(players)
-        
-        template_values = {'players' : players}
-        path = os.path.join(os.path.dirname(__file__), 'web/listPlayers.html')
-        self.response.out.write(template.render(path, template_values))
-        
-    def post(self):
-        logging.info(self.request)        
-        playerID = self.request.get('playerID')
-        lat = self.request.get('lat')
-        lon = self.request.get('lon')
-        player = PlayerService.getbyURLsafeKey(urlsafekey = playerID)
-        player.updatePosition(lat, lon)
-        self.redirect('/update')
-
-
-class DeletePlayer(webapp2.RequestHandler):
-    def post(self):
-        thePlayerToDelete = PlayerService.getbyURLsafeKey(self.request.get('deleteID'))
-        self.response.out.write("deleted! %s" % thePlayerToDelete.nickname )
-        PlayerService.deletePlayer(thePlayerToDelete)
-        self.redirect("/")
-        
-    def get(self):
-        self.redirect("/")
-
-class CreatePlayer(webapp2.RequestHandler):
-    def get(self):
-        self.redirect("/")
-
-    def post(self):
-        try:
-            parentGame = GameService.getbyURLsafeKey(self.request.get("ancestor"))
-            GameService.createPlayer(parentGame, self.request.get("nickname"))
-        except TypeError:
-            logging.info(self.request.get("ancestor"))
 
 
 app = webapp2.WSGIApplication([
     ('/', WebGamesHandler),
-    ('/createPlayer' , CreatePlayer       ),
-    ('/deletePlayer' , DeletePlayer       ),
-    ('/update'       , UpdateHandler      ),
-    ('/createGame'   , CreateGame         ),
     ('/play.json'    , JSONPositionHandler),
     ('/games.json'   , JSONGamesHandler   ),
     ('/player.json'  , JSONPlayerHandler  ),
     ('/resign.json'  , JSONResignHandler  ),
     ('/statics.json' , JSONStaticsHandler ),
     ('/dynamics.json', JSONDynamicsHandler),
+    ('/action.json'  , JSONActionHandler),
     ], debug=True)

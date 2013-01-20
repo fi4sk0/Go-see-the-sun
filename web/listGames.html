@@ -3,28 +3,10 @@
 
 <html>
   <body>
-  	<h1>List of games</h1>
-    {% for game in games %}
-        <b>{{ game.name }} ({{ game.birthdate }})</b>
-      	<form action="/" method="post">
-      		<input type="hidden" name="id" value="{{ game.key.urlsafe }}">
-      		<input type="submit" value="Show detail">
-      	</form>
-      	<blockquote>{{ game.description }}</blockquote>
-  	<hr>
-    {% endfor %}
-    
-    {% if games.count == 0 %}
-    	<b>Sorry, no games yet</b>
-	{% endif %}
-	<hr>
-	
-	<form action="/createGame" method="post">
-		Name: <input type="text" name="name"><br>
-		Description:<br> 
-		<textarea name="description" rows="3" cols="60">Your description</textarea><br>
-		Private<input type="checkbox" name="private"><br>
-		<input type="submit" value="Create">
-	</form>    
+  	<h1>Go See The Sun</h1>
+    Feel free to <a href="http://www.disney.com">leave</a> this page.
+  <form action="/" method="post">
+      Do you know what you're doing? <input type="submit" value="Delete all games">
+  </form>
   </body>
 </html>

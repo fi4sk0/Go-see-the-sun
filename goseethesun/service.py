@@ -8,6 +8,8 @@ from google.appengine.api import memcache
 
 from core import Game
 from core import Player
+from entities.BasicEntities import BasicEntity
+from gamecontrollers.BasicGameController import BasicGameController
 
 from datetime import datetime
 
@@ -16,56 +18,65 @@ import logging
 
 
 class GameService:
-    
-    @classmethod
-    def getPlayers(cls, game):
-        return Player.query(ancestor=game.key) 
-    
     @classmethod
     def allGames(cls):
         return Game.query()
-    
-    @classmethod
-    def getbyURLsafeKey(cls, urlsafekey):
-        key = ndb.Key(urlsafe = urlsafekey)
-        return key.get()
 
     @classmethod
-    def createPlayer(cls, parentGame, _nickname):
-        parentKey = parentGame.key;
-        player = Player(parent = parentKey,
-                        nickname = _nickname,
-                        position = ndb.GeoPt(0, 0),
-                        parentKey = parentKey.urlsafe())
-        player.put()
-        logging.info(parentGame.playerKeys)
-        parentGame.playerKeys.append(player.key.urlsafe())
-        memcache.set(parentGame.key.urlsafe(), parentGame)
-        parentGame.put()
-        return player
-            
+    def getById(cls, id):
+        return Game.get_by_id(id, parent=None)
+
     @classmethod
-    def createGame(cls, name, description, private):
+    def createPlayer(cls, parentId, name):
+        game = GameService.getById(parentId)
+        player = Player(name = name,
+                        position = ndb.GeoPt(0, 0),
+                        parentId = parentId)
+        player.put()
+        game.playerIds.append(player.key.id())
+        game.put()
+        return player
+
+    @classmethod
+    def createGame(cls, name, description, private, lat, lon):
         game = Game()
         game.name = name
         game.description = description
         game.private = private
+        game.center = ndb.GeoPt(lat, lon)
+
+        gameController = BasicGameController()
+        gameController.put()
+        game.gameControllerId = gameController.key.id()
+
         game.put()
         return game
-    
+
     @classmethod
-    def getBuddies(cls, player):
-        parentGameKey = player.parentKey
-        parentGame = GameService.getbyURLsafeKey(parentGameKey)
+    def getGameForPlayer(cls, playerId):
+        player = Player.get_by_id(playerId, parent=None)
+        return Game.get_by_id(player.parentId, parent=None)
+
+    @classmethod
+    def getBuddies(cls, playerId):
+        player = Player.get_by_id(playerId, parent=None)
+        return GameService.getPlayersForGame(player.parentId)
+
+    @classmethod
+    def getPlayersForGame(cls, gameId):
+        game = Game.get_by_id(int(gameId));
+
+        # Initialize string representations of player and entity IDs
+        game.makeStringValuedIds()
 
         # Get all cached buddies
-        buddyDictionary = memcache.get_multi(parentGame.playerKeys)
+        buddyDictionary = memcache.get_multi( game.playerIdStrings, key_prefix='player' )
 
         # Go through all buddy-keys of the parent game
-        for playerKey in parentGame.playerKeys:
+        for playerId in game.playerIdStrings:
             # if one is missing, reload from the database and add to the buddy dictionary
-            if playerKey not in buddyDictionary:
-                buddyDictionary[playerKey] = PlayerService.getbyURLsafeKey(playerKey)
+            if playerId not in buddyDictionary:
+                buddyDictionary[playerId] = Player.get_by_id( int(playerId), parent=None )
 
         # Now we're sure everybody is there. No Child Left Behind.
         # Everybody is in the dictionary. A good time to write it to the cache again
@@ -75,40 +86,59 @@ class GameService:
         return buddyDictionary.values()
         
         
-        
     @classmethod
     def toJSON(cls, games):
         gamesList = [game.to_dict() for game in games]
-        return json.dumps(gamesList, default=jsonhandler)
+        return json.dumps(gamesList, default=jsonHandler)
     
     @classmethod
     def singleGameToJSON(cls, game):
-        return json.dumps(game.to_dict(), default=jsonhandler)
-    
+        return json.dumps(game.to_dict(), default=jsonHandler)
+
+    @classmethod
+    def executeGameLogicForPlayer(cls, player):
+        game = GameService.getbyURLsafeKey(player.parentKey)
+
+        # See if our game has a game controller. If not, lazily instantiate one. Don't forget to put the new
+        # GameController into the gameControllerKey attribute of the corresponding game.
+        if( game.gameControllerKey == ""):
+            logging.info("Game didn't have a gamecontroller, creating one")
+        #    gameController = BasicGameController(parentKey = player.parentKey)
+         #   gameController.put()
+          #  game.gameControllerKey = gameController.key.urlsafe()
+           # game.put()
+
+        # Now we're sure we have a game controller. Retrieve by its key and execute simulation step for
+        # the current player
+#        gameController = ndb.Key(urlsafe = game.gameControllerKey)
+
+        #gameController.simulateStep()
+
+
+
+
+
+
+
     
 class PlayerService:
     @classmethod
     def allPlayers(cls):
         return Player.query()
-    
+
     @classmethod
-    def getbyURLsafeKey(cls, urlsafekey):
-        key = ndb.Key(urlsafe = urlsafekey)
-        return key.get()
-    
-    @classmethod
-    def deletePlayer(cls, playerKey):
-        player = PlayerService.getbyURLsafeKey(playerKey)
-        parentGame = GameService.getbyURLsafeKey(player.parentKey)
-        parentGame.playerKeys.remove(playerKey)
+    def deletePlayer(cls, playerId):
+        player = Player.get_by_id(playerId, parent=None)
+        parentGame = Game.get_by_id(player.parentId)
+        parentGame.playerIds.remove(playerId)
         parentGame.put()
-        memcache.delete(playerKey)
+        memcache.delete(str(playerId), namespace='players')
         player.key.delete()
         
     @classmethod
     def toJSON(cls, players):
         playersList = [player.to_dict() for player in players]
-        return json.dumps(playersList, default=jsonhandler)
+        return json.dumps(playersList, default=jsonHandler)
 
     @classmethod
     def updatePosition(cls, player, lat, lon):
@@ -117,10 +147,11 @@ class PlayerService:
         player.put()
         
     @classmethod
-    def updateCachedPosition(cls, urlsafekey, lat, lon):
-        player = PlayerService.getbyURLsafeKey(urlsafekey)
+    def updateCachedPosition(cls, keyId, lat, lon):
+        player = Player.get_by_id(keyId, parent = None)
+
         player.position = ndb.GeoPt(lat, lon)
-        memcache.set(urlsafekey, player, 10)
+        memcache.set(player.key.urlsafe(), player, 10)
         
     @classmethod
     def getCachedPosition(cls, urlsafekey):
@@ -133,11 +164,13 @@ class PlayerService:
     @classmethod
     def injectCachedPosition(cls, players):
         for player in players:
-            cachedPlayer = memcache.get(player.key.urlsafe())
+            cachedPlayer = memcache.get(str(player.key.id()))
             if cachedPlayer is not None:
                 player.position = cachedPlayer.position
 
-def jsonhandler(obj):
+
+
+def jsonHandler(obj):
     if hasattr(obj, 'strftime'):
         return obj.strftime('%H:%M:%S-%d-%m-%Y')
     elif isinstance(obj, ndb.GeoPt):
